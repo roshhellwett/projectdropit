@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "projectdropit"
+version = "1.0.1"
+description = "Menu-driven peer-to-peer encrypted file transfer for your LAN. No server, no admin, no setup."
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "roshhellwett" },
+  { name = "Zenith Open Source Projects" },
+]
+maintainers = [
+  { name = "roshhellwett" },
+]
+keywords = ["lan", "p2p", "file-transfer", "zeroconf", "mdns", "cli", "encryption"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Communications :: File Sharing",
+  "Topic :: Security :: Cryptography",
+  "Topic :: System :: Networking",
+]
+dependencies = [
+  "zeroconf>=0.131",
+  "cryptography>=41",
+  "rich>=13",
+  "tqdm>=4.65",
+]
+
+[project.urls]
+Homepage = "https://pypi.org/project/projectdropit/"
+Source = "https://github.com/roshhellwett/projectdropit"
+Issues = "https://github.com/roshhellwett/projectdropit/issues"
+Changelog = "https://github.com/roshhellwett/projectdropit/blob/main/CHANGELOG.md"
+Organization = "https://github.com/zenith-open-source"
+
+[project.scripts]
+projectdropit = "projectdropit.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["projectdropit*"]

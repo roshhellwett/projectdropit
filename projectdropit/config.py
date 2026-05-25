@@ -1,0 +1,88 @@
+"""Persistent user settings stored at ~/.projectdropit/config.json."""
+from __future__ import annotations
+
+import json
+import os
+import socket
+from pathlib import Path
+from typing import Any, Dict
+
+CONFIG_DIR = Path.home() / ".projectdropit"
+CONFIG_PATH = CONFIG_DIR / "config.json"
+DEFAULT_DOWNLOAD_DIR = Path.home() / "projectdropit"
+
+
+def _default_device_name() -> str:
+    try:
+        host = socket.gethostname() or "device"
+    except Exception:
+        host = "device"
+    # keep it short and clean
+    host = host.split(".")[0]
+    return host[:32] or "device"
+
+
+class Config:
+    def __init__(self, data: Dict[str, Any]):
+        self._data = data
+
+    @classmethod
+    def load(cls) -> "Config":
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        if CONFIG_PATH.exists():
+            try:
+                with CONFIG_PATH.open("r", encoding="utf-8") as f:
+                    return cls(json.load(f))
+            except Exception:
+                pass
+        return cls({})
+
+    def save(self) -> None:
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = CONFIG_PATH.with_suffix(".tmp")
+            with tmp.open("w", encoding="utf-8") as f:
+                json.dump(self._data, f, indent=2)
+            os.replace(tmp, CONFIG_PATH)
+        except Exception:
+            pass
+
+    # device name
+    @property
+    def device_name(self) -> str:
+        return self._data.get("device_name") or _default_device_name()
+
+    @device_name.setter
+    def device_name(self, value: str) -> None:
+        v = (value or "").strip()
+        if v:
+            self._data["device_name"] = v[:48]
+
+    @property
+    def has_device_name(self) -> bool:
+        return bool(self._data.get("device_name"))
+
+    # download dir
+    @property
+    def download_dir(self) -> Path:
+        raw = self._data.get("download_dir")
+        return Path(raw).expanduser() if raw else DEFAULT_DOWNLOAD_DIR
+
+    @download_dir.setter
+    def download_dir(self, value: str | Path) -> None:
+        # Always store an absolute path so future launches resolve identically
+        # regardless of the current working directory.
+        p = Path(value).expanduser()
+        try:
+            p = p.resolve(strict=False)
+        except Exception:
+            p = Path(os.path.abspath(str(p)))
+        self._data["download_dir"] = str(p)
+
+    def ensure_download_dir(self) -> Path:
+        d = self.download_dir
+        d.mkdir(parents=True, exist_ok=True)
+        return d
