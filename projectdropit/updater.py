@@ -7,14 +7,17 @@ Two entry points:
 ``latest_if_newer()`` returns the latest PyPI version string if it is newer
 than the running version, or ``None`` if up-to-date / not yet checked.
 ``has_checked()`` returns True once any check has completed.
+``last_error()`` returns the last network/parse error string, or None if the
+last check succeeded (even if no update was found).
 """
 from __future__ import annotations
 
 import json
 import re
 import threading
+import time
 import urllib.request
-from typing import Optional
+from typing import Optional, Tuple
 
 from . import __version__
 
@@ -27,7 +30,7 @@ _state = {
     "latest":  None,   # str | None — newer version found on PyPI
     "checked": False,  # True once any check has completed (success or error)
     "running": False,  # True while a background thread is in-flight
-    "error":   None,   # last error string, for diagnostics
+    "error":   None,   # last error string; None means last check succeeded
 }
 _lock = threading.Lock()
 
@@ -50,8 +53,12 @@ def _parse_version(v: str) -> tuple:
     return tuple(out) if out else (0,)
 
 
-def _fetch_latest(timeout: float) -> Optional[str]:
-    """Hit PyPI and return the latest version string, or None on any error."""
+def _fetch_latest(timeout: float) -> Tuple[Optional[str], Optional[str]]:
+    """Hit PyPI and return (version_or_none, error_or_none).
+
+    On success: (version_string_or_None, None)
+    On failure: (None, error_description_string)
+    """
     try:
         req = urllib.request.Request(
             _PYPI_URL,
@@ -59,18 +66,38 @@ def _fetch_latest(timeout: float) -> Optional[str]:
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        return (data.get("info") or {}).get("version") or None
-    except Exception:
-        return None
+        version = (data.get("info") or {}).get("version") or None
+        return (version, None)
+    except Exception as e:
+        return (None, str(e))
 
 
-def _apply_result(latest_version: Optional[str], error: Optional[str] = None) -> None:
-    """Write a completed check result into _state (must be called with _lock held)."""
-    if latest_version and _parse_version(latest_version) > _parse_version(__version__):
-        _state["latest"] = latest_version
-    _state["error"]   = error
+def _apply_result(latest_version: Optional[str], error: Optional[str]) -> None:
+    """Write a completed check result into _state. Must be called with _lock held."""
+    _state["error"] = error
     _state["checked"] = True
     _state["running"] = False
+    if error:
+        # Network/parse failure — don't overwrite a previously found update.
+        return
+    if latest_version and _parse_version(latest_version) > _parse_version(__version__):
+        _state["latest"] = latest_version
+    else:
+        # Successful check found no newer version — clear any stale result.
+        _state["latest"] = None
+
+
+def _wait_for_running(timeout: float) -> None:
+    """Block until any in-flight background thread finishes (or timeout expires)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        with _lock:
+            if not _state["running"]:
+                return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(0.05, remaining))
 
 
 # ---------------------------------------------------------------------------
@@ -78,9 +105,9 @@ def _apply_result(latest_version: Optional[str], error: Optional[str] = None) ->
 # ---------------------------------------------------------------------------
 
 def _run_async() -> None:
-    latest = _fetch_latest(_ASYNC_TIMEOUT_S)
+    version, error = _fetch_latest(_ASYNC_TIMEOUT_S)
     with _lock:
-        _apply_result(latest)
+        _apply_result(version, error)
 
 
 def check_async() -> Optional[threading.Thread]:
@@ -102,36 +129,17 @@ def check_sync(timeout: float = _SYNC_TIMEOUT_S) -> Optional[str]:
     """Perform a fresh, blocking PyPI check and return the newer version or None.
 
     Always hits the network regardless of whether a previous check has run.
-    Updates the shared state so ``latest_if_newer()`` reflects the new result.
+    Updates the shared state so ``latest_if_newer()`` and ``last_error()``
+    reflect the new result.
     """
     # Wait for any in-flight background check to finish first so we don't
     # race against it writing to _state.
     _wait_for_running(timeout=3.0)
 
-    try:
-        latest = _fetch_latest(timeout)
-    except Exception:
-        latest = None
-
+    version, error = _fetch_latest(timeout)
     with _lock:
-        # Reset so the new result is authoritative.
-        _state["latest"] = None
-        _apply_result(latest)
+        _apply_result(version, error)
     return _state["latest"]
-
-
-def _wait_for_running(timeout: float) -> None:
-    """Block until any in-flight background thread finishes (or timeout)."""
-    import time
-    deadline = time.monotonic() + timeout
-    while True:
-        with _lock:
-            if not _state["running"]:
-                return
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return
-        threading.Event().wait(min(0.1, remaining))
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +159,6 @@ def has_checked() -> bool:
 
 
 def last_error() -> Optional[str]:
-    """Return the last network/parse error string, or None if no error."""
+    """Return the last network/parse error string, or None if last check succeeded."""
     with _lock:
         return _state["error"]

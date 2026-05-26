@@ -5,7 +5,7 @@ import json
 import os
 import socket
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 CONFIG_DIR = Path.home() / ".projectdropit"
 CONFIG_PATH = CONFIG_DIR / "config.json"
@@ -25,6 +25,8 @@ def _default_device_name() -> str:
 class Config:
     def __init__(self, data: Dict[str, Any]):
         self._data = data
+        # Set when load() detects a corrupt config file so the CLI can warn.
+        self.load_warning: Optional[str] = None
 
     @classmethod
     def load(cls) -> "Config":
@@ -35,20 +37,32 @@ class Config:
         if CONFIG_PATH.exists():
             try:
                 with CONFIG_PATH.open("r", encoding="utf-8") as f:
-                    return cls(json.load(f))
-            except Exception:
-                pass
+                    raw = f.read()
+                data = json.loads(raw)
+                if not isinstance(data, dict):
+                    raise ValueError("config root must be a JSON object")
+                return cls(data)
+            except Exception as e:
+                # Config is corrupt — start fresh but surface a warning.
+                cfg = cls({})
+                cfg.load_warning = (
+                    f"Config file is corrupt and was reset ({e}). "
+                    f"Your previous settings have been lost."
+                )
+                return cfg
         return cls({})
 
-    def save(self) -> None:
+    def save(self) -> bool:
+        """Persist settings to disk. Returns True on success, False on failure."""
         try:
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             tmp = CONFIG_PATH.with_suffix(".tmp")
             with tmp.open("w", encoding="utf-8") as f:
                 json.dump(self._data, f, indent=2)
             os.replace(tmp, CONFIG_PATH)
+            return True
         except Exception:
-            pass
+            return False
 
     # device name
     @property

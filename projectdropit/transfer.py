@@ -124,7 +124,6 @@ class IncomingTransfer:
     verified: bool = False
     finished_at: Optional[float] = None
     # internal:
-    _channel: Optional[SecureChannel] = field(default=None, repr=False)
     _decision: threading.Event = field(default_factory=threading.Event, repr=False)
     _accepted: bool = field(default=False, repr=False)
 
@@ -335,7 +334,6 @@ class ReceiverServer:
                 filename=filename,
                 size=size,
                 started_at=time.time(),
-                _channel=ch,
             )
             with self._lock:
                 self.transfers.append(t)
@@ -454,12 +452,13 @@ class ReceiverServer:
 
 
 def _unique_path(p: Path) -> Path:
+    """Return p if it doesn't exist, otherwise p with a (1), (2), … suffix."""
     if not p.exists():
         return p
     stem, suffix = p.stem, p.suffix
-    i = 1
-    while True:
+    for i in range(1, 10_001):
         cand = p.with_name(f"{stem} ({i}){suffix}")
         if not cand.exists():
             return cand
-        i += 1
+    # Extremely unlikely: fall back to a UUID-based name.
+    return p.with_name(f"{stem}_{uuid.uuid4().hex[:8]}{suffix}")

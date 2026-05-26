@@ -124,7 +124,8 @@ def _onboard(cfg: Config) -> None:
             console.print("[red]Please keep the name under 48 characters.[/red]")
             continue
         cfg.device_name = name
-        cfg.save()
+        if not cfg.save():
+            console.print("[yellow]⚠  Settings could not be saved to disk.[/yellow]")
         console.print(
             f"[green]✓ You will appear on the LAN as[/green] "
             f"[bold cyan]{cfg.device_name}[/bold cyan]"
@@ -198,11 +199,21 @@ def _run_pip_upgrade() -> None:
         return
     if rc == 0:
         console.print(
-            "[green]✓ Updated. Please restart the app to use the new version:[/green] "
+            "[green]✓ Updated successfully.[/green] "
+            "Restart the app to use the new version: "
             "[cyan]projectdropit -start[/cyan]"
         )
-        sys.exit(0)
+        # Raise a dedicated exception so main()'s finally block can suppress
+        # the generic "Shutting down…" message that would otherwise appear.
+        raise _UpdatedAndExit()
     console.print(f"[red]Update exited with code {rc}.[/red] Try manually: [cyan]pip install -U projectdropit[/cyan]")
+
+
+class _UpdatedAndExit(SystemExit):
+    """Raised after a successful pip upgrade to exit cleanly without the
+    generic 'Shutting down…' message."""
+    def __init__(self) -> None:
+        super().__init__(0)
 
 
 # =============================================================================
@@ -583,7 +594,8 @@ def _action_settings(cfg: Config, disc: DiscoveryService, ip: Optional[str], por
             new_name = Prompt.ask("New device name", default=cfg.device_name).strip()
             if new_name and new_name != cfg.device_name:
                 cfg.device_name = new_name
-                cfg.save()
+                if not cfg.save():
+                    console.print("[yellow]⚠  Settings could not be saved to disk.[/yellow]")
                 disc.update_device_name(cfg.device_name)
                 console.print(
                     f"[green]✓ Device name updated to[/green] [bold]{cfg.device_name}[/bold]."
@@ -594,7 +606,8 @@ def _action_settings(cfg: Config, disc: DiscoveryService, ip: Optional[str], por
                 try:
                     cfg.download_dir = new_dir
                     cfg.ensure_download_dir()
-                    cfg.save()
+                    if not cfg.save():
+                        console.print("[yellow]⚠  Settings could not be saved to disk.[/yellow]")
                     console.print(
                         f"[green]✓ Download folder set to[/green] [bold]{cfg.download_dir}[/bold]."
                     )
@@ -652,6 +665,11 @@ def _action_settings(cfg: Config, disc: DiscoveryService, ip: Optional[str], por
 def main() -> None:
     flags = _parse_args()
     cfg = Config.load()
+
+    # Surface any config corruption warning before onboarding.
+    if cfg.load_warning:
+        console.print(f"[yellow]⚠  {cfg.load_warning}[/yellow]")
+
     _onboard(cfg)
     cfg.ensure_download_dir()
 
@@ -756,6 +774,17 @@ def main() -> None:
                     break
     except KeyboardInterrupt:
         console.print()
+    except _UpdatedAndExit:
+        # Successful pip upgrade — skip the generic shutdown message.
+        try:
+            disc.stop()
+        except Exception:
+            pass
+        try:
+            rx.stop()
+        except Exception:
+            pass
+        return
     finally:
         console.print("\n[dim]Shutting down…[/dim]")
         try:

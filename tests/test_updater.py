@@ -77,20 +77,22 @@ def test_check_async_noop_when_already_checked():
 
 def test_check_sync_up_to_date(monkeypatch):
     _reset()
-    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: None)
+    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: (None, None))
     result = updater.check_sync()
     assert result is None
     assert updater.has_checked()
     assert updater.latest_if_newer() is None
+    assert updater.last_error() is None
 
 
 def test_check_sync_finds_newer(monkeypatch):
     _reset()
-    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: "99.0.0")
+    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: ("99.0.0", None))
     result = updater.check_sync()
     assert result == "99.0.0"
     assert updater.latest_if_newer() == "99.0.0"
     assert updater.has_checked()
+    assert updater.last_error() is None
 
 
 def test_check_sync_resets_stale_result(monkeypatch):
@@ -98,7 +100,7 @@ def test_check_sync_resets_stale_result(monkeypatch):
     _reset()
     updater._state["latest"] = "99.0.0"
     updater._state["checked"] = True
-    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: None)
+    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: (None, None))
     result = updater.check_sync()
     assert result is None
     assert updater.latest_if_newer() is None
@@ -107,13 +109,13 @@ def test_check_sync_resets_stale_result(monkeypatch):
 def test_check_sync_ignores_same_version(monkeypatch):
     """check_sync must not report the current version as an update."""
     _reset()
-    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: updater.__version__)
+    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: (updater.__version__, None))
     result = updater.check_sync()
     assert result is None
 
 
 def test_check_sync_handles_network_error(monkeypatch):
-    """check_sync must not raise on network failure."""
+    """check_sync must not raise on network failure, and must set last_error."""
     _reset()
 
     def _fail(timeout):
@@ -123,6 +125,8 @@ def test_check_sync_handles_network_error(monkeypatch):
     result = updater.check_sync()
     assert result is None
     assert updater.has_checked()
+    # last_error must be set so the CLI can show a proper message
+    assert updater.last_error() is not None
 
 
 def test_check_sync_works_after_startup_check(monkeypatch):
@@ -131,7 +135,7 @@ def test_check_sync_works_after_startup_check(monkeypatch):
     # Simulate startup check completing with no update found.
     updater._state.update({"latest": None, "checked": True, "running": False})
     # Now a new version is available — check_sync must detect it.
-    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: "2.0.0")
+    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: ("2.0.0", None))
     result = updater.check_sync()
     assert result == "2.0.0", (
         "check_sync must perform a fresh check even after startup check ran"
