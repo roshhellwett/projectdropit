@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "projectdropit"
-version = "1.0.1"
+version = "1.0.3"
 description = "Menu-driven peer-to-peer encrypted file transfer for your LAN. No server, no admin, no setup."
 readme = "README.md"
 requires-python = ">=3.8"
