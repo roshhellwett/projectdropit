@@ -105,3 +105,12 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ---------------------------------------------------------------------------
+# pytest-compatible entry point
+# ---------------------------------------------------------------------------
+
+def test_loopback() -> None:
+    """Full loopback transfer test under pytest."""
+    assert main() == 0, "loopback transfer test failed"

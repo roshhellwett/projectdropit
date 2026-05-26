@@ -57,6 +57,8 @@ class SecureChannel:
         header = _recv_exact(self.sock, NONCE_LEN + LEN_LEN)
         nonce = header[:NONCE_LEN]
         (length,) = struct.unpack(">I", header[NONCE_LEN:])
+        # A zero-length ciphertext is technically valid (empty plaintext) but
+        # the protocol never sends empty frames, so treat it as a framing error.
         if length == 0 or length > 16 * 1024 * 1024:
             raise ValueError(f"invalid frame length: {length}")
         ct = _recv_exact(self.sock, length)
@@ -73,7 +75,12 @@ def _derive_key(shared_secret: bytes) -> bytes:
 
 
 def handshake(sock: socket.socket) -> SecureChannel:
-    """Symmetric X25519 handshake. Either side may call this on a connected socket."""
+    """Symmetric X25519 handshake. Either side may call this on a connected socket.
+
+    Both sides send their hello simultaneously (TCP is full-duplex) and then
+    read the peer's hello. The 37-byte hello fits comfortably in the TCP send
+    buffer, so there is no deadlock risk.
+    """
     priv = X25519PrivateKey.generate()
     pub_bytes = priv.public_key().public_bytes(
         encoding=serialization.Encoding.Raw,

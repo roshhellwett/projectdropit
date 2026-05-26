@@ -54,3 +54,25 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ---------------------------------------------------------------------------
+# pytest-compatible entry point
+# ---------------------------------------------------------------------------
+
+def test_sanitize_cases() -> None:
+    """Run all sanitize_filename cases under pytest."""
+    failures = []
+    for raw, expected in CASES:
+        got = sanitize_filename(raw)
+        if got != expected:
+            failures.append(
+                f"sanitize_filename({raw!r}) = {got!r}, expected {expected!r}"
+            )
+    assert not failures, "\n".join(failures)
+
+
+def test_sanitize_length_cap() -> None:
+    """sanitize_filename must cap output at 200 characters."""
+    got = sanitize_filename("x" * 500 + ".bin")
+    assert len(got) <= 200, f"length cap not enforced: {len(got)}"

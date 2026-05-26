@@ -172,6 +172,17 @@ class DiscoveryService:
             self._zc.register_service(self._info)
         except Exception:
             pass
+        # Restart the browser so the self-filter uses the new service name.
+        try:
+            if self._browser:
+                self._browser.cancel()
+        except Exception:
+            pass
+        listener = _Listener(self._peers, lambda: self._service_name, self._lock)
+        try:
+            self._browser = ServiceBrowser(self._zc, SERVICE_TYPE, listener)
+        except Exception:
+            pass
 
     def peers(self) -> List[Peer]:
         with self._lock:

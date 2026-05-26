@@ -196,7 +196,7 @@ def _run_pip_upgrade() -> None:
 def _format_bps(bps: float) -> str:
     if bps <= 0:
         return "—"
-    units = [("B/s", 1), ("KB/s", 1024), ("MB/s", 1024 ** 2), ("GB/s", 1024 ** 3)]
+    units = [("B/s", 1), ("KB/s", 1024), ("MB/s", 1024 ** 2), ("GB/s", 1024 ** 3), ("TB/s", 1024 ** 4)]
     label, scale = units[0]
     for lbl, sc in units:
         if bps >= sc:
@@ -532,7 +532,7 @@ def _action_incoming(rx: ReceiverServer) -> None:
         if accept:
             console.print(
                 f"[green]✓ Accepted.[/green] Saving to "
-                f"[bold]{Path(rx._get_dir()) / t.filename}[/bold]  "
+                f"[bold]{Path(rx.download_dir()) / t.filename}[/bold]  "
                 "[green]🔒 Encrypted[/green]"
             )
         else:
@@ -659,7 +659,9 @@ def main() -> None:
             "[dim]You may not appear in others' peer lists, but you can still receive incoming connections if reachable.[/dim]"
         )
 
-    update_offered = [False]
+    update_offered = False
+    _seen_done: set = set()
+    _seen_done_lock = threading.Lock()
 
     def on_offer(t: IncomingTransfer) -> None:
         # Visible nudge — does not block the menu input.
@@ -670,14 +672,17 @@ def main() -> None:
             f"Open [cyan]Incoming Transfers[/cyan] to accept or reject."
         )
 
-    _seen_done: set = set()
-
     def on_update(t: IncomingTransfer) -> None:
         # Surface a one-time visible line when a transfer completes / fails.
-        if t.id in _seen_done:
-            return
+        # Guard with a lock since on_update is called from receiver threads.
+        with _seen_done_lock:
+            if t.id in _seen_done:
+                return
+            if t.status in (STATUS_DONE, STATUS_FAILED):
+                _seen_done.add(t.id)
+            else:
+                return
         if t.status == STATUS_DONE:
-            _seen_done.add(t.id)
             verified = " [green]✓ verified[/green]" if t.verified else ""
             console.print(
                 f"\n[bold green]✓ Received[/bold green] "
@@ -686,7 +691,6 @@ def main() -> None:
                 f"[bold]{t.save_path}[/bold]{verified}"
             )
         elif t.status == STATUS_FAILED:
-            _seen_done.add(t.id)
             console.print(
                 f"\n[bold red]✗ Receive failed[/bold red] "
                 f"[bold]{t.filename}[/bold] from [bold]{t.sender_name}[/bold]: "
@@ -699,9 +703,9 @@ def main() -> None:
     try:
         # small grace period for the update check to finish
         time.sleep(0.4)
-        if flags["check_updates"] and not update_offered[0]:
+        if flags["check_updates"] and not update_offered:
             _maybe_offer_update()
-            update_offered[0] = True
+            update_offered = True
 
         while True:
             console.print()

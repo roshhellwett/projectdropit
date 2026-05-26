@@ -1,6 +1,6 @@
 [![python](https://img.shields.io/badge/python-3.8%2B-blue)](#)
 [![license](https://img.shields.io/badge/license-MIT-green)](#)
-[![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey)](#)
+[![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#)
 
 # PROJECTDROPIT
 
@@ -12,7 +12,7 @@
 - ⚡ **Zero setup** — no internet, no cloud, no accounts, no admin/root, no pre-shared passwords
 - ✨ **Premium TUI** — rich panels, live discovery, progress, speed, ETA
 - 🔄 **Auto-update check** on launch (via PyPI, non-blocking)
-- 🐧 **Linux** + 🪟 **Windows**, Python 3.8+
+- 🐧 **Linux** + 🪟 **Windows** + 🍎 **macOS**, Python 3.8+
 
 ---
 
@@ -74,9 +74,9 @@ before opening its socket.
 | Flag | Purpose |
 |---|---|
 | `-start` / `--start` / `start` | launch the menu (default) |
-| `--no-update` | skip update check on launch |
-| `-v` / `--version` | print version and exit |
-| `-h` / `--help` | show usage |
+| `--no-update` / `-no-update` | skip update check on launch |
+| `-v` / `--version` / `version` | print version and exit |
+| `-h` / `--help` / `help` | show usage |
 
 ## Non-goals
 

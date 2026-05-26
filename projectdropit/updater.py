@@ -16,20 +16,22 @@ from . import __version__
 _PYPI_URL = "https://pypi.org/pypi/projectdropit/json"
 _TIMEOUT_S = 4.0
 
-_state = {"latest": None, "checked": False, "error": None}
+_state = {"latest": None, "checked": False, "error": None, "running": False}
 _lock = threading.Lock()
 
 
 def _parse_version(v: str) -> tuple:
     """Loose semver compare. Strips suffixes like '-rc1', 'a1', 'b2', '+meta'."""
     v = v.strip()
+    if not v:
+        return (0,)
     # split off any pre-release / build metadata
     v = re.split(r"[+\-]", v, maxsplit=1)[0]
     out = []
     for part in v.split("."):
         m = re.match(r"^(\d+)", part)
         out.append(int(m.group(1)) if m else 0)
-    return tuple(out)
+    return tuple(out) if out else (0,)
 
 
 def _run() -> None:
@@ -50,10 +52,15 @@ def _run() -> None:
     finally:
         with _lock:
             _state["checked"] = True
+            _state["running"] = False
 
 
-def check_async() -> threading.Thread:
-    """Kick off a single background check. Idempotent."""
+def check_async() -> Optional[threading.Thread]:
+    """Kick off a single background check. Idempotent — no-op if already running or done."""
+    with _lock:
+        if _state["checked"] or _state["running"]:
+            return None
+        _state["running"] = True
     t = threading.Thread(target=_run, name="pdit-updater", daemon=True)
     t.start()
     return t

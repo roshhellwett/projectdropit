@@ -56,3 +56,12 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ---------------------------------------------------------------------------
+# pytest-compatible entry point
+# ---------------------------------------------------------------------------
+
+def test_small_json_regression() -> None:
+    """Small JSON file regression test under pytest."""
+    assert main() == 0, "small JSON regression test failed"

@@ -22,6 +22,7 @@ classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Environment :: Console",
   "Intended Audience :: End Users/Desktop",
+  "Operating System :: MacOS",
   "Operating System :: POSIX :: Linux",
   "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python :: 3",
@@ -55,3 +56,9 @@ projectdropit = "projectdropit.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["projectdropit*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v"

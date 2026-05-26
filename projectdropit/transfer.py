@@ -6,7 +6,8 @@ Session lifecycle (after `crypto.handshake` completes):
   receiver → sender : JSON {"type":"response","accept":bool,"reason":"..."}
   if accepted:
       sender → receiver : N bytes of file content (split into many encrypted frames)
-      sender → receiver : JSON {"type":"done"}
+      sender → receiver : JSON {"type":"done","sha256":"<hex>"}
+      receiver → sender : JSON {"type":"ack","ok":bool,"reason":"..."}
 
 All control messages are UTF-8 JSON inside a single encrypted frame. File
 content travels as raw bytes inside encrypted frames; the receiver knows the
@@ -30,7 +31,9 @@ from typing import Callable, Dict, List, Optional
 from .crypto import SecureChannel, handshake
 
 CHUNK_SIZE = 64 * 1024
-OFFER_TIMEOUT = 120.0  # seconds the sender waits for accept/reject
+OFFER_TIMEOUT = 120.0       # seconds the sender waits for accept/reject
+DATA_TIMEOUT = 300.0        # seconds allowed for the full data transfer (5 min)
+SENDER_NAME_MAX = 128       # cap peer-supplied sender name to prevent DoS
 
 
 # ---------------------------------------------------------------------------
@@ -42,8 +45,12 @@ def _send_json(ch: SecureChannel, obj: dict) -> None:
 
 
 def _recv_json(ch: SecureChannel) -> dict:
+    """Receive one encrypted frame and decode it as a JSON object (dict)."""
     raw = ch.recv()
-    return json.loads(raw.decode("utf-8"))
+    parsed = json.loads(raw.decode("utf-8"))
+    if not isinstance(parsed, dict):
+        raise ValueError(f"expected JSON object, got {type(parsed).__name__}")
+    return parsed
 
 
 _WIN_RESERVED = {
@@ -88,7 +95,7 @@ def human_size(n: int) -> str:
         if f < 1024.0 or unit == "TB":
             return f"{f:.1f} {unit}" if unit != "B" else f"{int(f)} {unit}"
         f /= 1024.0
-    return f"{n} B"
+    return f"{n} B"  # unreachable, satisfies type checkers
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +150,7 @@ def send_file(
 ) -> dict:
     """Send `filepath` to peer. Blocking. Returns a result dict.
 
-    Result keys: ok (bool), reason (str), bytes_sent (int).
+    Result keys: ok (bool), reason (str), bytes_sent (int), sha256 (str, on success).
     """
     filepath = Path(filepath)
     if not filepath.is_file():
@@ -163,7 +170,7 @@ def send_file(
         ch = handshake(sock)
         _send_json(ch, {
             "type": "offer",
-            "sender": sender_name,
+            "sender": sender_name[:SENDER_NAME_MAX],
             "filename": filepath.name,
             "size": size,
         })
@@ -176,7 +183,8 @@ def send_file(
                 "bytes_sent": 0,
             }
 
-        sock.settimeout(None)
+        # Use a generous but finite timeout for the data transfer phase.
+        sock.settimeout(DATA_TIMEOUT)
         sent = 0
         hasher = hashlib.sha256()
         with filepath.open("rb") as f:
@@ -256,6 +264,9 @@ class ReceiverServer:
                 self._sock.close()
         except Exception:
             pass
+        # Wait briefly for the accept thread to exit cleanly.
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2.0)
 
     # ------------------------------------------------------------------
     def pending(self) -> List[IncomingTransfer]:
@@ -265,6 +276,10 @@ class ReceiverServer:
     def history(self) -> List[IncomingTransfer]:
         with self._lock:
             return list(self.transfers)
+
+    def download_dir(self) -> Path:
+        """Public accessor for the configured download directory."""
+        return self._get_dir()
 
     def decide(self, transfer_id: str, accept: bool) -> bool:
         with self._lock:
@@ -298,11 +313,20 @@ class ReceiverServer:
             offer = _recv_json(ch)
             if offer.get("type") != "offer":
                 return
+
             filename = sanitize_filename(str(offer.get("filename") or "file.bin"))
-            size = int(offer.get("size") or 0)
+
+            # Validate size: must be a non-negative integer within a sane range.
+            raw_size = offer.get("size")
+            try:
+                size = int(raw_size)
+            except (TypeError, ValueError):
+                return
             if size < 0 or size > 1024 ** 4:  # 1 TB sanity cap
                 return
-            sender_name = str(offer.get("sender") or "unknown")
+
+            # Cap sender name to prevent memory abuse.
+            sender_name = str(offer.get("sender") or "unknown")[:SENDER_NAME_MAX]
 
             t = IncomingTransfer(
                 id=uuid.uuid4().hex[:8],
@@ -327,14 +351,20 @@ class ReceiverServer:
             if not decided:
                 t.status = STATUS_REJECTED
                 t.error = "timed out waiting for user decision"
-                _send_json(ch, {"type": "response", "accept": False, "reason": "timeout"})
+                try:
+                    _send_json(ch, {"type": "response", "accept": False, "reason": "timeout"})
+                except Exception:
+                    pass
                 if self.on_update:
                     self.on_update(t)
                 return
 
             if not t._accepted:
                 t.status = STATUS_REJECTED
-                _send_json(ch, {"type": "response", "accept": False, "reason": "rejected"})
+                try:
+                    _send_json(ch, {"type": "response", "accept": False, "reason": "rejected"})
+                except Exception:
+                    pass
                 if self.on_update:
                     self.on_update(t)
                 return
@@ -349,7 +379,8 @@ class ReceiverServer:
                 self.on_update(t)
             _send_json(ch, {"type": "response", "accept": True})
 
-            conn.settimeout(None)
+            # Use a generous but finite timeout for the data transfer phase.
+            conn.settimeout(DATA_TIMEOUT)
             received = 0
             hasher = hashlib.sha256()
             with save_path.open("wb") as out:
@@ -381,8 +412,13 @@ class ReceiverServer:
             if received < size:
                 t.status = STATUS_FAILED
                 t.error = f"truncated: got {received}/{size} bytes"
+                # Clean up the incomplete file.
+                try:
+                    save_path.unlink()
+                except Exception:
+                    pass
             elif expected_sha and hasher.hexdigest() != expected_sha:
-                # delete corrupted file so user is not misled
+                # Delete corrupted file so user is not misled.
                 try:
                     save_path.unlink()
                 except Exception:
@@ -407,6 +443,7 @@ class ReceiverServer:
             if t is not None:
                 t.status = STATUS_FAILED
                 t.error = str(e)
+                t.finished_at = time.time()
                 if self.on_update:
                     self.on_update(t)
         finally:
