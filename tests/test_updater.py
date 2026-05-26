@@ -127,6 +127,24 @@ def test_check_sync_handles_network_error(monkeypatch):
     assert updater.has_checked()
     # last_error must be set so the CLI can show a proper message
     assert updater.last_error() is not None
+    assert "no network" in updater.last_error()
+
+
+def test_check_sync_clears_error_on_success(monkeypatch):
+    """A successful check must clear a previous error."""
+    _reset()
+    updater._state["error"] = "previous error"
+    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: (None, None))
+    updater.check_sync()
+    assert updater.last_error() is None
+
+
+def test_last_error_set_on_network_failure(monkeypatch):
+    """last_error() must return a non-None string when the network is unavailable."""
+    _reset()
+    monkeypatch.setattr(updater, "_fetch_latest", lambda timeout: (None, "connection refused"))
+    updater.check_sync()
+    assert updater.last_error() == "connection refused"
 
 
 def test_check_sync_works_after_startup_check(monkeypatch):
@@ -170,9 +188,9 @@ def main() -> int:
     original = updater._fetch_latest
     try:
         for label, patch, expected in [
-            ("check_sync up-to-date",       lambda t: None,    None),
-            ("check_sync finds newer",       lambda t: "99.0.0", "99.0.0"),
-            ("check_sync network error",     _make_raiser(),    None),
+            ("check_sync up-to-date",       lambda t: (None, None),      None),
+            ("check_sync finds newer",       lambda t: ("99.0.0", None),  "99.0.0"),
+            ("check_sync network error",     _make_raiser(),              None),
         ]:
             _reset()
             updater._fetch_latest = patch
@@ -188,7 +206,7 @@ def main() -> int:
         # Core bug regression
         _reset()
         updater._state.update({"latest": None, "checked": True, "running": False})
-        updater._fetch_latest = lambda t: "2.0.0"
+        updater._fetch_latest = lambda t: ("2.0.0", None)
         result = updater.check_sync()
         if result == "2.0.0":
             print("OK  check_sync works after startup check (core bug regression)")

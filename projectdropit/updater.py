@@ -136,7 +136,11 @@ def check_sync(timeout: float = _SYNC_TIMEOUT_S) -> Optional[str]:
     # race against it writing to _state.
     _wait_for_running(timeout=3.0)
 
-    version, error = _fetch_latest(timeout)
+    try:
+        version, error = _fetch_latest(timeout)
+    except Exception as e:
+        version, error = None, str(e)
+
     with _lock:
         _apply_result(version, error)
     return _state["latest"]
