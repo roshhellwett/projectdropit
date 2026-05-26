@@ -149,10 +149,26 @@ def _firewall_warning() -> None:
 # =============================================================================
 
 def _maybe_offer_update() -> None:
-    """Called once after a brief grace period. Non-blocking."""
+    """Wait for the background update check to finish, then offer if newer."""
+    # Give the background thread up to 5 s to complete. This is called after
+    # the 0.4 s startup sleep, so we have ~4.6 s of budget left.
+    for _ in range(46):
+        if updater.has_checked():
+            break
+        time.sleep(0.1)
+
     latest = updater.latest_if_newer()
     if not latest:
         return
+    _show_update_banner(latest)
+    try:
+        if Confirm.ask("[bold]Update now?[/bold]", default=False):
+            _run_pip_upgrade()
+    except (EOFError, KeyboardInterrupt):
+        console.print("\n[dim]Skipped update.[/dim]")
+
+
+def _show_update_banner(latest: str) -> None:
     console.print()
     console.print(Panel(
         Text.from_markup(
@@ -165,18 +181,18 @@ def _maybe_offer_update() -> None:
         title="✨ projectdropit",
         title_align="left",
     ))
-    try:
-        if Confirm.ask("[bold]Update now?[/bold]", default=False):
-            _run_pip_upgrade()
-    except (EOFError, KeyboardInterrupt):
-        console.print("\n[dim]Skipped update.[/dim]")
 
 
 def _run_pip_upgrade() -> None:
     cmd = [sys.executable, "-m", "pip", "install", "-U", "projectdropit"]
     console.print(f"[dim]$ {' '.join(shlex.quote(c) for c in cmd)}[/dim]")
     try:
-        rc = subprocess.call(cmd)
+        result = subprocess.run(cmd, timeout=120)
+        rc = result.returncode
+    except subprocess.TimeoutExpired:
+        console.print("[red]Update timed out after 2 minutes.[/red] Try manually:")
+        console.print("[cyan]pip install -U projectdropit[/cyan]")
+        return
     except Exception as e:
         console.print(f"[red]Update failed:[/red] {e}")
         return
@@ -186,7 +202,7 @@ def _run_pip_upgrade() -> None:
             "[cyan]projectdropit -start[/cyan]"
         )
         sys.exit(0)
-    console.print(f"[red]Update exited with code {rc}.[/red] Try manually.")
+    console.print(f"[red]Update exited with code {rc}.[/red] Try manually: [cyan]pip install -U projectdropit[/cyan]")
 
 
 # =============================================================================
@@ -585,23 +601,31 @@ def _action_settings(cfg: Config, disc: DiscoveryService, ip: Optional[str], por
                 except Exception as e:
                     console.print(f"[red]Could not set folder:[/red] {e}")
         elif choice == "3":
-            updater.check_async()
-            console.print("[dim]Checking PyPI…[/dim]")
-            for _ in range(20):
-                if updater.has_checked():
-                    break
-                time.sleep(0.25)
-            latest = updater.latest_if_newer()
+            console.print("[dim]Checking PyPI for updates…[/dim]")
+            try:
+                latest = updater.check_sync()
+            except Exception as e:
+                console.print(f"[red]Update check failed:[/red] {e}")
+                latest = None
             if latest:
-                console.print(
-                    f"[bold green]Update available:[/bold green] "
-                    f"{__version__} → {latest}\n"
-                    f"[dim]Run:[/dim] [cyan]pip install -U projectdropit[/cyan]"
-                )
-                if Confirm.ask("Update now?", default=False):
-                    _run_pip_upgrade()
+                _show_update_banner(latest)
+                try:
+                    if Confirm.ask("Update now?", default=False):
+                        _run_pip_upgrade()
+                except (EOFError, KeyboardInterrupt):
+                    console.print("\n[dim]Skipped update.[/dim]")
             else:
-                console.print("[green]✓ You're on the latest version.[/green]")
+                err = updater.last_error()
+                if err:
+                    console.print(
+                        f"[yellow]Could not reach PyPI[/yellow] [dim]({err})[/dim]\n"
+                        "[dim]Check your internet connection and try again.[/dim]"
+                    )
+                else:
+                    console.print(
+                        f"[green]✓ You're on the latest version[/green] "
+                        f"[dim](v{__version__})[/dim]."
+                    )
         elif choice == "4":
             console.print(Panel(
                 Text.from_markup(
