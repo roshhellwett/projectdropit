@@ -666,6 +666,12 @@ def main() -> None:
     flags = _parse_args()
     cfg = Config.load()
 
+    # One-time migration: ~/projectdropit → ~/projectdropit_files
+    # The old name shadowed the package when Python ran from the home directory.
+    migration_msg = Config.migrate_legacy_download_dir()
+    if migration_msg:
+        console.print(f"[dim]{migration_msg}[/dim]")
+
     # Surface any config corruption warning before onboarding.
     if cfg.load_warning:
         console.print(f"[yellow]⚠  {cfg.load_warning}[/yellow]")

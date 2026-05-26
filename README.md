@@ -49,7 +49,7 @@ will see you. Settings can be changed later from the menu.
 5. Quit
 ```
 
-Received files land in `~/projectdropit/` by default.
+Received files land in `~/projectdropit_files/` by default.
 
 ## How it works
 

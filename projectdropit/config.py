@@ -9,7 +9,9 @@ from typing import Any, Dict, Optional, Tuple
 
 CONFIG_DIR = Path.home() / ".projectdropit"
 CONFIG_PATH = CONFIG_DIR / "config.json"
-DEFAULT_DOWNLOAD_DIR = Path.home() / "projectdropit"
+# IMPORTANT: must NOT be ~/projectdropit — that would shadow the package name
+# when Python is run from the home directory ('' in sys.path resolves to ~/).
+DEFAULT_DOWNLOAD_DIR = Path.home() / "projectdropit_files"
 
 
 def _default_device_name() -> str:
@@ -100,3 +102,24 @@ class Config:
         d = self.download_dir
         d.mkdir(parents=True, exist_ok=True)
         return d
+
+    @staticmethod
+    def migrate_legacy_download_dir() -> Optional[str]:
+        """Rename ~/projectdropit → ~/projectdropit_files if it exists and is not
+        already the new default. Returns a message if migration happened, else None.
+
+        This is a one-time migration for users who had the old default.
+        The old directory name shadowed the package when Python was run from ~.
+        """
+        old = Path.home() / "projectdropit"
+        new = Path.home() / "projectdropit_files"
+        if old.exists() and old.is_dir() and not new.exists():
+            try:
+                old.rename(new)
+                return (
+                    f"Moved download folder: {old} → {new}\n"
+                    f"(The old name conflicted with the package when running from your home directory.)"
+                )
+            except Exception:
+                pass
+        return None
